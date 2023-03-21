@@ -1,42 +1,71 @@
+use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::thread::JoinHandle;
+use std::{thread, time};
+
+use autopilot::mouse;
 use gtk::{glib, Application, ApplicationWindow};
 use gtk::{prelude::*, Button};
 
-const APP_ID: &str = "org.gtk_rs.HelloWorld2";
+const APP_ID: &str = "dev.al.AutoClicker";
 
 fn main() -> glib::ExitCode {
-    // Create a new application
     let app = Application::builder().application_id(APP_ID).build();
-
-    // Connect to "activate" signal of `app`
     app.connect_activate(build_ui);
 
-    // Run the application
     app.run()
 }
 
 fn build_ui(app: &Application) {
-    // Create a button with label and margins
+    let count = Arc::new(Mutex::new(0));
+    let started = Arc::new(RwLock::new(false));
+
     let button = Button::builder()
-        .label("Press me!")
+        .label("Start")
         .margin_top(12)
         .margin_bottom(12)
         .margin_start(12)
         .margin_end(12)
         .build();
 
-    // Connect to "clicked" signal of `button`
-    button.connect_clicked(|button| {
-        // Set the label to "Hello World!" after the button has been clicked on
-        button.set_label("Hello World!");
+    let (tx, rx) = mpsc::channel();
+
+    button.connect_clicked(move |button| {
+        let mut started = started.try_write().unwrap();
+        *started = !*started;
+
+        tx.send(*started).unwrap();
+
+        let label = format!("started: {:?}", *started);
+        button.set_label(label.as_str());
     });
 
-    // Create a window
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("My GTK App")
+        .title("Auto Clicker")
         .child(&button)
         .build();
 
-    // Present window
     window.present();
+    window.set_focus_visible(true);
+
+    thread::spawn(move || {
+        let mut handle: Option<JoinHandle<()>> = None;
+        while let Ok(s) = rx.recv() {
+            let count = count.clone();
+            start_task(count);
+        }
+    });
+}
+
+fn start_task(count: Arc<Mutex<usize>>) -> JoinHandle<()> {
+    let intv = time::Duration::from_millis(3000);
+
+    let h = thread::spawn(move || loop {
+        mouse::click(mouse::Button::Left, Some(1));
+        let mut count = count.lock().unwrap();
+        *count += 1;
+        println!("Clicked {:?} time(s)", *count);
+        thread::sleep(intv);
+    });
+    h
 }
