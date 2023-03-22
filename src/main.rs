@@ -1,10 +1,9 @@
-use std::sync::{mpsc, Arc, Mutex, RwLock};
-use std::thread::JoinHandle;
-use std::{thread, time};
+use std::sync::{Arc, Mutex};
 
-use autopilot::mouse;
 use gtk::{glib, Application, ApplicationWindow};
 use gtk::{prelude::*, Button};
+
+mod clicker;
 
 const APP_ID: &str = "dev.al.AutoClicker";
 
@@ -16,8 +15,9 @@ fn main() -> glib::ExitCode {
 }
 
 fn build_ui(app: &Application) {
-    let count = Arc::new(Mutex::new(0));
-    let started = Arc::new(RwLock::new(false));
+    let mut mouse_handler = clicker::Clicker::new();
+    mouse_handler.init();
+    let mouse_handler = Arc::new(Mutex::new(mouse_handler));
 
     let button = Button::builder()
         .label("Start")
@@ -27,17 +27,11 @@ fn build_ui(app: &Application) {
         .margin_end(12)
         .build();
 
-    let (tx, rx) = mpsc::channel();
-
-    button.connect_clicked(move |button| {
-        let mut started = started.try_write().unwrap();
-        *started = !*started;
-
-        tx.send(*started).unwrap();
-
-        let label = format!("started: {:?}", *started);
-        button.set_label(label.as_str());
+    button.connect_clicked(move |_| {
+        let mut c = mouse_handler.lock().unwrap();
+        c.toggle();
     });
+    button.set_label("Start");
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -47,25 +41,4 @@ fn build_ui(app: &Application) {
 
     window.present();
     window.set_focus_visible(true);
-
-    thread::spawn(move || {
-        let mut handle: Option<JoinHandle<()>> = None;
-        while let Ok(s) = rx.recv() {
-            let count = count.clone();
-            start_task(count);
-        }
-    });
-}
-
-fn start_task(count: Arc<Mutex<usize>>) -> JoinHandle<()> {
-    let intv = time::Duration::from_millis(3000);
-
-    let h = thread::spawn(move || loop {
-        mouse::click(mouse::Button::Left, Some(1));
-        let mut count = count.lock().unwrap();
-        *count += 1;
-        println!("Clicked {:?} time(s)", *count);
-        thread::sleep(intv);
-    });
-    h
 }
