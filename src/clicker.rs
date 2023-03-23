@@ -22,26 +22,31 @@ impl Clicker {
         let count = self.count.clone();
         let running = self.running.clone();
 
-        thread::spawn(move || loop {
-            let running = running.lock().unwrap();
-            let mut count = count.lock().unwrap();
+        thread::spawn(move || {
+            let running = running.try_lock().unwrap();
 
-            if *running {
-                mouse::click(mouse::Button::Left, Some(1));
-                *count += 1;
-                println!("clicked {:?} times", *count);
-                thread::sleep(time::Duration::from_millis(3000));
-            } else {
-                *count = 0;
-                thread::sleep(time::Duration::from_millis(1000));
+            loop {
+                let mut count = count.try_lock().unwrap();
+
+                if *running {
+                    mouse::click(mouse::Button::Left, Some(1));
+                    *count += 1;
+                    println!("clicked {:?} times", *count);
+                    thread::sleep(time::Duration::from_millis(3000));
+                } else {
+                    *count = 0;
+                    thread::sleep(time::Duration::from_millis(1000));
+                }
             }
         });
     }
 
     pub fn toggle(&mut self) {
         let running = self.running.clone();
-        let mut running = running.lock().unwrap();
-        *running = !*running;
-        println!("Next: {:?}", *running);
+        thread::spawn(move || {
+            let mut running = running.try_lock().unwrap();
+            *running = !*running;
+            println!("Next: {:?}", *running);
+        });
     }
 }
