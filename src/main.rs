@@ -3,7 +3,7 @@ use std::{thread, time};
 
 use autopilot::mouse;
 use gtk::glib::{clone, MainContext, PRIORITY_DEFAULT};
-use gtk::{glib, Application, ApplicationWindow, Label, Box};
+use gtk::{glib, Application, ApplicationWindow, Box, Entry, EntryBuffer, InputPurpose, Label};
 use gtk::{prelude::*, Button};
 
 const APP_ID: &str = "dev.al.AutoClicker";
@@ -44,13 +44,26 @@ fn build_ui(app: &Application) {
     });
     button.set_label("Start");
 
+    let text_buffer = EntryBuffer::builder().text("3").build();
+    let input = Entry::with_buffer(&text_buffer);
+    text_buffer.set_text("3");
+    input.set_margin_start(10);
+    input.set_margin_end(10);
+    input.set_input_purpose(InputPurpose::Number);
+    input.connect_changed(move |e| {
+        let new_text = e.text();
+        let filtered_text: String = new_text.chars().filter(|c| c.is_numeric()).collect();
+        if new_text != filtered_text {
+            text_buffer.set_text(&filtered_text);
+        }
+    });
+
     let vbox = Box::new(gtk::Orientation::Vertical, 10);
+    vbox.append(&input);
     vbox.append(&label);
     vbox.append(&button);
 
-    vbox.set_margin_start(10);
-    vbox.set_margin_end(10);
-    vbox.set_margin_top(10);
+    vbox.set_margin_top(20);
     vbox.set_margin_bottom(10);
 
     let window = ApplicationWindow::builder()
@@ -77,7 +90,7 @@ fn build_ui(app: &Application) {
             sender
                 .send(Message::UpdateCountText(*running, *count))
                 .unwrap();
-            println!("running: {:?}, count: {:?}", *running, *count);
+            // println!("running: {:?}, count: {:?}", *running, *count);
         }
 
         thread::sleep(time::Duration::from_secs(1));
@@ -95,7 +108,7 @@ fn build_ui(app: &Application) {
                                     format!("Status: Stopped")
                                 };
                                 label.set_text(&text);
-                                
+
                                 Continue(true)
                             }
                         }
