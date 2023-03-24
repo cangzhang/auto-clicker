@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
+use std::{thread, time};
 
-use gtk::glib::{MainContext, PRIORITY_DEFAULT};
+use autopilot::mouse;
+use gtk::glib::{MainContext, PRIORITY_DEFAULT, clone};
 use gtk::{glib, Application, ApplicationWindow};
 use gtk::{prelude::*, Button};
-
-mod clicker;
 
 const APP_ID: &str = "dev.al.AutoClicker";
 
@@ -20,9 +20,8 @@ fn main() -> glib::ExitCode {
 }
 
 fn build_ui(app: &Application) {
-    let mut mouse_handler = clicker::Clicker::new();
-    mouse_handler.init();
-    let mouse_handler = Arc::new(Mutex::new(mouse_handler));
+    let count = Arc::new(Mutex::new(0));
+    let running = Arc::new(Mutex::new(false));
 
     let (sender, receiver) = MainContext::channel(PRIORITY_DEFAULT);
 
@@ -34,7 +33,12 @@ fn build_ui(app: &Application) {
         .margin_end(12)
         .build();
 
+    let running_ui = running.clone();
+    // let count_ui = count.clone();
     button.connect_clicked(move |_| {
+        let mut running = running_ui.lock().unwrap();
+        *running = !*running;
+
         sender
             .send(Message::ToggleTaskStatus)
             .expect("Send ToggleCommand failed");
@@ -50,13 +54,32 @@ fn build_ui(app: &Application) {
     window.present();
     window.set_focus_visible(true);
 
-    receiver.attach(None, move |msg| {
-        match msg {
-            Message::ToggleTaskStatus => {
-                let mut handler = mouse_handler.lock().unwrap();
-                handler.toggle();
+    thread::spawn(move || loop {
+        {
+            let running = running.lock().unwrap();
+            let mut count = count.lock().unwrap();
+            if *running {
+                mouse::click(mouse::Button::Left, Some(1));
+                *count += 1;
+            } else {
+                *count = 0;
             }
+            println!("running: {:?}, count: {:?}", *running, *count);
         }
-        Continue(true)
+
+        thread::sleep(time::Duration::from_secs(1));
     });
+
+    receiver.attach(
+        None,
+        clone!(@weak button => @default-return Continue(false),
+                    move |msg| {
+                        match msg {
+                            Message::ToggleTaskStatus => {
+                                Continue(true)
+                            }
+                        }
+                    }
+        ),
+    );
 }
