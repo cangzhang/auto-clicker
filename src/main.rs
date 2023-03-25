@@ -22,6 +22,8 @@ fn main() -> glib::ExitCode {
 fn build_ui(app: &Application) {
     let count = Arc::new(Mutex::new(0));
     let running = Arc::new(Mutex::new(false));
+    let intv_default: u64 = 3;
+    let intv = Arc::new(Mutex::new(intv_default));
 
     let (sender, receiver) = MainContext::channel(PRIORITY_DEFAULT);
 
@@ -50,11 +52,16 @@ fn build_ui(app: &Application) {
     input.set_margin_start(10);
     input.set_margin_end(10);
     input.set_input_purpose(InputPurpose::Number);
+    
+    let intv_ui = intv.clone();
     input.connect_changed(move |e| {
         let new_text = e.text();
         let filtered_text: String = new_text.chars().filter(|c| c.is_numeric()).collect();
         if new_text != filtered_text {
             text_buffer.set_text(&filtered_text);
+            let seconds = new_text.parse::<u64>().unwrap();
+            let mut intv = intv_ui.lock().unwrap();
+            *intv = seconds;
         }
     });
 
@@ -77,6 +84,7 @@ fn build_ui(app: &Application) {
     window.present();
     window.set_focus_visible(true);
 
+    let intv_thread = intv.clone();
     thread::spawn(move || loop {
         {
             let running = running.lock().unwrap();
@@ -90,10 +98,11 @@ fn build_ui(app: &Application) {
             sender
                 .send(Message::UpdateCountText(*running, *count))
                 .unwrap();
-            // println!("running: {:?}, count: {:?}", *running, *count);
         }
 
-        thread::sleep(time::Duration::from_secs(1));
+        let intv = intv_thread.lock().unwrap();
+        let intv = if *intv > 0 { *intv } else { 1 };
+        thread::sleep(time::Duration::from_secs(intv));
     });
 
     receiver.attach(
@@ -107,11 +116,11 @@ fn build_ui(app: &Application) {
                                 } else {
                                     format!("Status: Stopped")
                                 };
-                                label.set_text(&text);
 
-                                Continue(true)
-                            }
+                                label.set_text(&text);
+                            },
                         }
+                        Continue(true)
                     }
         ),
     );
