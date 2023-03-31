@@ -54,12 +54,15 @@ fn build_ui(app: &Application) {
     input.set_input_purpose(InputPurpose::Number);
     
     let intv_ui = intv.clone();
-    input.connect_changed(move |e| {
-        let new_text = e.text();
+    input.connect_changed(move |input| {
+        let new_text = input.text();
         let filtered_text: String = new_text.chars().filter(|c| c.is_numeric()).collect();
         if new_text != filtered_text {
             text_buffer.set_text(&filtered_text);
-            let seconds = new_text.parse::<u64>().unwrap();
+        }
+
+        println!("filtered: {filtered_text}");
+        if let Ok(seconds) = filtered_text.parse::<u64>() {
             let mut intv = intv_ui.lock().unwrap();
             *intv = seconds;
         }
@@ -92,8 +95,6 @@ fn build_ui(app: &Application) {
             if *running {
                 mouse::click(mouse::Button::Left, Some(1));
                 *count += 1;
-            } else {
-                *count = 0;
             }
             sender
                 .send(Message::UpdateCountText(*running, *count))
@@ -101,7 +102,7 @@ fn build_ui(app: &Application) {
         }
 
         let intv = intv_thread.lock().unwrap();
-        let intv = if *intv > 0 { *intv } else { 1 };
+        let intv = if *intv > 1 { *intv } else { 1 };
         thread::sleep(time::Duration::from_secs(intv));
     });
 
