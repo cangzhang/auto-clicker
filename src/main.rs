@@ -22,7 +22,7 @@ fn main() -> glib::ExitCode {
 fn build_ui(app: &Application) {
     let count = Arc::new(Mutex::new(0));
     let running = Arc::new(Mutex::new(false));
-    let intv_default: u64 = 3;
+    let intv_default: f64 = 3.;
     let intv = Arc::new(Mutex::new(intv_default));
 
     let (sender, receiver) = MainContext::channel(PRIORITY_DEFAULT);
@@ -46,13 +46,14 @@ fn build_ui(app: &Application) {
     });
     button.set_label("Start");
 
-    let text_buffer = EntryBuffer::builder().text("3").build();
+    let text_buffer = EntryBuffer::builder()
+        .text(format!("{intv_default}"))
+        .build();
     let input = Entry::with_buffer(&text_buffer);
-    text_buffer.set_text("3");
     input.set_margin_start(10);
     input.set_margin_end(10);
     input.set_input_purpose(InputPurpose::Number);
-    
+
     let intv_ui = intv.clone();
     input.connect_changed(move |input| {
         let new_text = input.text();
@@ -62,7 +63,7 @@ fn build_ui(app: &Application) {
         }
 
         println!("filtered: {filtered_text}");
-        if let Ok(seconds) = filtered_text.parse::<u64>() {
+        if let Ok(seconds) = filtered_text.parse::<f64>() {
             let mut intv = intv_ui.lock().unwrap();
             *intv = seconds;
         }
@@ -101,9 +102,15 @@ fn build_ui(app: &Application) {
                 .unwrap();
         }
 
-        let intv = intv_thread.lock().unwrap();
-        let intv = if *intv > 1 { *intv } else { 1 };
-        thread::sleep(time::Duration::from_secs(intv));
+        {
+            let intv = intv_thread.lock().unwrap();
+            if *intv > 1. {
+                println!("interval: {:?}", *intv);
+                thread::sleep(time::Duration::from_secs_f64(*intv));
+            } else {
+                thread::sleep(time::Duration::from_millis(200));
+            };
+        }
     });
 
     receiver.attach(
@@ -113,7 +120,7 @@ fn build_ui(app: &Application) {
                         match msg {
                             Message::UpdateCountText(status, count) => {
                                 let text = if status {
-                                    format!("Status: Running, Count: {count} times")
+                                    format!("Status: Running, Count: {count}")
                                 } else {
                                     format!("Status: Stopped")
                                 };
