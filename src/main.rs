@@ -1,135 +1,127 @@
-use std::sync::{Arc, Mutex};
-use std::{thread, time};
+use iced::widget::{button, column, row, text};
+use iced::{executor, Alignment, Application, Command, Element, Length, Settings, Theme};
 
-use autopilot::mouse;
-use gtk::glib::{clone, MainContext, PRIORITY_DEFAULT};
-use gtk::{glib, Application, ApplicationWindow, Box, Entry, EntryBuffer, InputPurpose, Label};
-use gtk::{prelude::*, Button};
+pub fn main() -> iced::Result {
+    App::run(Settings::default())
+}
 
-const APP_ID: &str = "dev.al.AutoClicker";
+#[derive(Debug, Default)]
+struct App {
+    count: i32,
+    running: bool,
+    last_time: u64,
+}
 
+#[derive(Debug, Clone, Copy)]
 enum Message {
-    UpdateCountText(bool, usize),
+    IncreaseCount,
+    Start,
+    Stop,
+    CheckTask,
 }
 
-fn main() -> glib::ExitCode {
-    let app = Application::builder().application_id(APP_ID).build();
-    app.connect_activate(build_ui);
+impl Application for App {
+    type Executor = executor::Default;
+    type Message = Message;
+    type Theme = Theme;
+    type Flags = ();
 
-    app.run()
-}
+    fn new(_flags: ()) -> (Self, Command<Message>) {
+        (
+            Self {
+                ..Default::default()
+            },
+            Command::none(),
+        )
+    }
 
-fn build_ui(app: &Application) {
-    let count = Arc::new(Mutex::new(0));
-    let running = Arc::new(Mutex::new(false));
-    let intv_default: f64 = 3.;
-    let intv = Arc::new(Mutex::new(intv_default));
+    fn title(&self) -> String {
+        String::from("Auto Clicker")
+    }
 
-    let (sender, receiver) = MainContext::channel(PRIORITY_DEFAULT);
-
-    let button = Button::builder()
-        .label("Start")
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .build();
-
-    let label = Label::new(None);
-    label.set_text("");
-
-    let running_ui = running.clone();
-    button.connect_clicked(move |btn| {
-        let mut running = running_ui.lock().unwrap();
-        *running = !*running;
-        btn.set_label(if *running { "Stop" } else { "Start" });
-    });
-    button.set_label("Start");
-
-    let text_buffer = EntryBuffer::builder()
-        .text(format!("{intv_default}"))
-        .build();
-    let input = Entry::with_buffer(&text_buffer);
-    input.set_margin_start(10);
-    input.set_margin_end(10);
-    input.set_input_purpose(InputPurpose::Number);
-
-    let intv_ui = intv.clone();
-    input.connect_changed(move |input| {
-        let new_text = input.text();
-        let filtered_text: String = new_text.chars().filter(|c| c.is_numeric()).collect();
-        if new_text != filtered_text {
-            text_buffer.set_text(&filtered_text);
-        }
-
-        println!("filtered: {filtered_text}");
-        if let Ok(seconds) = filtered_text.parse::<f64>() {
-            let mut intv = intv_ui.lock().unwrap();
-            *intv = seconds;
-        }
-    });
-
-    let vbox = Box::new(gtk::Orientation::Vertical, 10);
-    vbox.append(&input);
-    vbox.append(&label);
-    vbox.append(&button);
-
-    vbox.set_margin_top(20);
-    vbox.set_margin_bottom(10);
-
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .default_height(100)
-        .default_width(200)
-        .title("Auto Clicker")
-        .child(&vbox)
-        .build();
-
-    window.present();
-    window.set_focus_visible(true);
-
-    let intv_thread = intv.clone();
-    thread::spawn(move || loop {
-        {
-            let running = running.lock().unwrap();
-            let mut count = count.lock().unwrap();
-            if *running {
-                mouse::click(mouse::Button::Left, Some(1));
-                *count += 1;
+    fn update(&mut self, message: Message) -> Command<Message> {
+        match message {
+            Message::IncreaseCount => {
+                self.count += 1;
+                self.last_time = get_time_in_ms();
             }
-            sender
-                .send(Message::UpdateCountText(*running, *count))
-                .unwrap();
-        }
+            Message::Stop => {
+                self.count = 0;
+                self.running = false;
+            }
+            Message::Start => {
+                self.running = true;
+                self.count = 0;
+                self.last_time = get_time_in_ms();
+            }
+            Message::CheckTask => {
+                if !self.running {
+                    return Command::none();
+                }
 
-        {
-            let intv = intv_thread.lock().unwrap();
-            if *intv > 1. {
-                println!("interval: {:?}", *intv);
-                thread::sleep(time::Duration::from_secs_f64(*intv));
-            } else {
-                thread::sleep(time::Duration::from_millis(200));
-            };
-        }
-    });
+                // delay for the first time
+                let current_time = get_time_in_ms();
+                let intv = current_time - self.last_time;
+                if self.count == 0 && intv < 1500 {
+                    return Command::none();
+                }
 
-    receiver.attach(
-        None,
-        clone!(@weak button => @default-return Continue(false),
-                    move |msg| {
-                        match msg {
-                            Message::UpdateCountText(status, count) => {
-                                let text = if status {
-                                    format!("Status: Running, Count: {count}")
-                                } else {
-                                    format!("Status: Stopped")
-                                };
+                // run every 2000ms
+                if intv < 2000 {
+                    return Command::none();
+                }
 
-                                label.set_text(&text);
-                            },
-                        }
-                        Continue(true)
-                    }
-        ),
-    );
+                return Command::perform(trigger_click(), |_| Message::IncreaseCount);
+            }
+        };
+        Command::none()
+    }
+
+    fn theme(&self) -> Theme {
+        Theme::Light
+    }
+
+    fn view(&self) -> Element<Message> {
+        column![
+            row![
+                text(self.count).size(50),
+                text("  ->  ").size(20),
+                text(if self.running { "Y" } else { "N" }).size(30)
+            ]
+            .align_items(Alignment::Center),
+            text(format!("last time: {:?}", self.last_time)).size(30),
+            row![
+                button("Start").on_press(Message::Start),
+                button("Stop").on_press(Message::Stop),
+            ]
+            .spacing(20)
+        ]
+        .width(Length::Fill)
+        .align_items(Alignment::Center)
+        .padding(20)
+        .spacing(20)
+        .into()
+    }
+
+    fn subscription(&self) -> iced::Subscription<Self::Message> {
+        iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::CheckTask)
+    }
+}
+
+async fn trigger_click() -> anyhow::Result<()> {
+    use autopilot::mouse;
+
+    mouse::click(mouse::Button::Left, Some(1));
+    // let handle = tokio::spawn(async move {
+    // });
+    // handle.await?;
+    Ok(())
+}
+
+fn get_time_in_ms() -> u64 {
+    let current = std::time::SystemTime::now();
+    let since_the_epoch = current
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Time went backwards");
+    since_the_epoch.as_secs() * 1000 + since_the_epoch.subsec_nanos() as u64 / 1_000_000
 }
